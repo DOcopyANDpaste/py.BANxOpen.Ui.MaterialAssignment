@@ -1,0 +1,100 @@
+[project]
+name = "banxopen-ui-material-assignment"
+description = "BANxOpen Material Assignment: the NX Block UI dialog that assigns physical materials to bodies."
+dynamic = ["version"]
+requires-python = "==3.11.*"          # must match NX 2412's embedded Python
+dependencies = ["banxopen-foundation>=1.1.0", "banxopen-materials>=1.0.0", "banxopen-sheetmetal>=1.1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov", "ruff", "pyright", "import-linter", "pre-commit"]
+
+[tool.uv.sources]
+banxopen-foundation = { path = "../BANxOpen.Foundation", editable = true }
+banxopen-materials = { path = "../BANxOpen.Materials", editable = true }
+banxopen-sheetmetal = { path = "../BANxOpen.SheetMetal", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/banxopen/ui_material_assignment/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/banxopen"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120               # the team's C# column width
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RET", "PTH", "TID", "RUF", "BLE", "ANN"]
+ignore = ["ANN401"]                   # Any is allowed at NX boundaries (with a comment)
+
+[tool.ruff.lint.isort]
+known-first-party = ["banxopen"]
+known-local-folder = ["builders"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+"application/**" = ["E402", "F401", "N999"]
+"**/*_generated.py" = ["ALL"]
+
+[tool.ruff.format]
+exclude = ["**/*_generated.py"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+strict = [
+    "src/banxopen/ui_material_assignment/text.py",
+    "src/banxopen/ui_material_assignment/pending.py",
+    "src/banxopen/ui_material_assignment/rows.py",
+    "src/banxopen/ui_material_assignment/session.py",
+    "src/banxopen/ui_material_assignment/presenter.py",
+]
+stubPath = "typings"                  # junction to %UGII_BASE_DIR%\UGOPEN\pythonStubs (see README)
+reportMissingModuleSource = false     # NXOpen has stubs but no source outside NX
+ignore = ["**/*_generated.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-ra --strict-markers"
+markers = ["nx: needs a running NX session (excluded from CI)"]
+
+[tool.coverage.run]
+source = ["banxopen.ui_material_assignment"]
+omit = ["*_generated.py", "*/dialog.py", "*/view.py", "*/property_window.py", "*/entry.py"]
+
+[tool.importlinter]
+root_packages = ["banxopen.ui_material_assignment", "banxopen.foundation", "banxopen.materials", "banxopen.sheetmetal"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Libraries used only through their public API"
+type = "forbidden"
+source_modules = ["banxopen.ui_material_assignment"]
+forbidden_modules = [
+    "banxopen.foundation.core", "banxopen.foundation.model", "banxopen.foundation.nx_adapters",
+    "banxopen.materials.core", "banxopen.materials.model", "banxopen.materials.nx_adapters",
+    "banxopen.sheetmetal.core", "banxopen.sheetmetal.model", "banxopen.sheetmetal.nx_adapters",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "The dialog's logic is NX-free, so it is tested without NX"
+type = "forbidden"
+source_modules = [
+    "banxopen.ui_material_assignment.text",
+    "banxopen.ui_material_assignment.pending",
+    "banxopen.ui_material_assignment.rows",
+    "banxopen.ui_material_assignment.session",
+    "banxopen.ui_material_assignment.presenter",
+]
+forbidden_modules = ["NXOpen"]
+allow_indirect_imports = true
