@@ -82,6 +82,17 @@ class PendingAssignment:
 PendingEntry = PendingRemoval | PendingAssignment
 
 
+@dataclass(frozen=True, slots=True)
+class PendingPreferred:
+    """The pending preferred-material change, shown as its own pending-tree entry when no pending assignment carries
+    that material. Not in the session's pending list: the session keeps the change itself (`pending_preferred`), and
+    this is only how the tree shows it."""
+
+    material: str
+    rows: tuple[PendingBodyRow, ...] = ()
+    """Always empty: the change is to the part, not to a body."""
+
+
 def claims_by_body(entries: Iterable[PendingEntry]) -> dict[BodyId, PendingEntry]:
     """The entry each pending body is claimed by."""
     return {row.body.id: entry for entry in entries for row in entry.rows}

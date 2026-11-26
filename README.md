@@ -87,7 +87,9 @@ Remove material (the clicked rows' bodies)
 
 ```
 Apply / OK
-├─ Pending not empty → apply the pending list:
+├─ Something to apply (pending entries, or a preferred material change)
+│   ├─ No preferred material would be defined ──► error "Define a preferred material before saving";
+│   │                                              nothing is applied (see F)
 │   ├─ Re-read the part
 │   ├─ The removal first (each body is in only one entry, so the order is only for predictability):
 │   │   ├─ Bodies no longer in the part ──────────► reported and dropped
@@ -106,6 +108,9 @@ Apply / OK
 │   │   │   │                                       the rest stay ("Not applied — <NX message>")
 │   │   │   └─ Failed ─────────────────────────────► all stay pending ("Not applied — <NX message>")
 │   │   └─ Re-read the part (the next entry is planned against what this one did)
+│   ├─ Then the preferred material, when it changes, to the part attribute Material / Preferred Material
+│   │   ├─ Ok ─────────────────────────────────────► leaves Pending
+│   │   └─ Failed ─────────────────────────────────► stays pending, with NX's message
 │   ├─ One message: error if anything is still pending, info if everything applied but there were notes
 │   └─ Both trees refresh: Current shows the new materials, Pending shows only what is left
 │       ├─ Apply: the dialog stays open
@@ -119,9 +124,11 @@ Apply / OK
 ### D. Other actions
 
 ```
-Remove from pending / Clear all pending ► removed from the list only; the part is not touched
-Cancel / close ► anything still pending is discarded, after "N pending change(s) … will be discarded. Close
-                 anyway?" when there is any. Applied changes are final and are never reverted.
+Remove from pending / Clear all pending ► removed from the list only; the part is not touched. Clear all also
+                 drops the preferred material change
+Cancel / close ► anything still pending (the preferred material change included) is discarded, after "N pending
+                 change(s) … will be discarded. Close anyway?" when there is any. Applied changes are final and are
+                 never reverted.
 Refresh        ► re-reads the part and drops pending bodies that no longer exist (Apply re-plans the rest)
 ```
 
@@ -143,6 +150,41 @@ On open
 ├─ Several sheet metal bodies ─► info message only (the multi-body check decides)
 └─ Info box: what is out of sync, and what was done about it
    Removing the staged entry from Pending is final for this session of the dialog: it is not staged again.
+```
+
+### F. Preferred material
+
+Each part has one preferred material, stored by name in the part attribute **Material / Preferred Material**
+(String). Other tools read that attribute. It is written after Apply's pending list, and only when it changes. If the
+part has no such attribute yet, it is created in the Material category.
+
+- **Current Assignment** shows the part's value: its material row has the checked box and is listed first. The tab
+  does not change until Apply.
+- **Every change is pending.** *Set as preferred* (right-click in any of the three trees), or a click on a box:
+  - a pending assignment of that material already in the list → that entry's box is checked;
+  - otherwise → its own entry, "Preferred material: X", which you remove with *Remove from pending*.
+  The preferred entry is listed first. Only one change is pending at a time: a new one replaces it. Choosing the
+  part's own value drops the change.
+- On the material that already is the preferred one, the menu says *Remove as preferred*. For a pending change it drops
+  the change, as does a click on its checked box. For the part's own value it is disabled: a part needs a preferred
+  material, so you replace it by setting another one.
+- **Any material may be preferred**, on a body or not. `AssignmentSettings.warn_preferred_not_in_part` (off by default)
+  adds a note when it is on no body; even then it is allowed.
+- **Save gate:** Apply/OK refuse while there is something to apply and no preferred material would be defined.
+- **Sheet metal part** (one material per part): the preferred material is the sheet metal body's material. It is the
+  body's pending assignment if it has one, and otherwise the body's own material when the attribute differs from it.
+  *Set as preferred* is disabled. A pending removal from the sheet metal body leaves no preferred material, so Apply
+  refuses.
+
+```
+Set as preferred <material>
+├─ Sheet metal part ──────────────────────► disabled (follows the sheet metal body)
+├─ Same as the part's value ──────────────► drops any pending preferred change
+├─ Already the pending preferred material ► "Remove as preferred": drops the change
+└─ Otherwise ─────────────────────────────► pending preferred = <material>
+    ├─ A pending assignment of it? ───────► its entry's box is checked
+    ├─ None ──────────────────────────────► "Preferred material: <material>" entry
+    └─ On no body, warning switched on ───► info note (still staged)
 ```
 
 ## Trees
@@ -185,6 +227,12 @@ The two `*_generated.py` files were transcribed from the C# Styler output, not g
 6. A part with one out-of-sync sheet metal body shows the open message and stages the sync.
 7. Properties opens the popup, and closing it returns to the dialog.
 8. Cancel with something pending asks first. After closing, the syslog (Help > Log File) has no errors.
+9. Preferred material, on a part with no Preferred Material attribute:
+   - stage an assignment and Apply → refused until a material is set as preferred;
+   - Set as preferred on a material no body has → its own pending entry; Apply writes it (File > Properties >
+     Attributes, Material category). Ctrl+Z takes back the attribute change on its own ("Set Preferred Material");
+   - reopen → the Current tab lists that material first with its box checked;
+   - on a sheet metal part, the attribute follows the sheet metal body's material.
 
 ## Development
 

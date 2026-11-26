@@ -401,7 +401,7 @@ def test_apply_with_nothing_pending_says_so():
 
 
 def test_apply_applies_the_removal_then_each_assignment():
-    w = plain_world(body("b1"), body("b2"), assignments=[assigned("b2", "Steel")])
+    w = plain_world(body("b1"), body("b2"), assignments=[assigned("b2", "Steel")], preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1"))
     s.stage_removal(ids("b2"))
@@ -416,7 +416,7 @@ def test_apply_applies_the_removal_then_each_assignment():
 
 
 def test_a_body_nx_refuses_stays_pending_with_the_reason():
-    w = plain_world(body("b1"), body("b2"), fail_on={"b2": "NX 123: no"})
+    w = plain_world(body("b1"), body("b2"), fail_on={"b2": "NX 123: no"}, preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1", "b2"))
 
@@ -445,7 +445,7 @@ def test_ok_with_nothing_pending_closes():
 
 
 def test_a_body_gone_from_the_part_is_reported_and_dropped():
-    w = plain_world(body("b1"), body("b2"))
+    w = plain_world(body("b1"), body("b2"), preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1", "b2"))
     w.part.bodies.pop()
@@ -459,7 +459,7 @@ def test_a_body_gone_from_the_part_is_reported_and_dropped():
 
 
 def test_apply_asks_for_a_confirmation_that_arose_after_staging():
-    w = plain_world(body("b1"), answers=[True])
+    w = plain_world(body("b1"), answers=[True], preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1"))
     w.part.assignments[BodyId("b1")] = assigned("b1", "Aluminium")  # changed under the dialog
@@ -471,7 +471,7 @@ def test_apply_asks_for_a_confirmation_that_arose_after_staging():
 
 
 def test_a_confirmation_given_when_staging_is_not_asked_again():
-    w = plain_world(body("b1"), assignments=[assigned("b1", "Aluminium")], answers=[True])
+    w = plain_world(body("b1"), assignments=[assigned("b1", "Aluminium")], answers=[True], preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1"))
 
@@ -482,7 +482,7 @@ def test_a_confirmation_given_when_staging_is_not_asked_again():
 
 
 def test_a_confirmation_declined_at_apply_keeps_the_body_pending():
-    w = plain_world(body("b1"), answers=[False])
+    w = plain_world(body("b1"), answers=[False], preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1"))
     w.part.assignments[BodyId("b1")] = assigned("b1", "Aluminium")

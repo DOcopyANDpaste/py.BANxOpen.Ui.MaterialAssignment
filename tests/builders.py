@@ -30,7 +30,7 @@ from banxopen.sheetmetal import (
     SheetMetalPartPreference,
     SheetMetalStandardSelection,
 )
-from banxopen.ui_material_assignment.session import AssignmentServices, AssignmentSession
+from banxopen.ui_material_assignment.session import AssignmentServices, AssignmentSession, AssignmentSettings
 
 PLAIN = "Metals"
 SHEET_METAL = "SheetMetal"
@@ -76,6 +76,10 @@ class FakePart:
     fail_on: Mapping[BodyId, str] = field(default_factory=dict)
     applied: list[ExecutablePlan] = field(default_factory=list)
     cleared: list[list[BodyId]] = field(default_factory=list)
+    preferred: str | None = None
+    """The part's preferred-material attribute."""
+    preferred_writes: list[str] = field(default_factory=list)
+    fail_preferred_write: str | None = None
 
     def get_bodies(self) -> Sequence[BodyInfo]:
         return list(self.bodies)
@@ -101,6 +105,16 @@ class FakePart:
             if body_id not in self.fail_on:
                 self.assignments.pop(body_id, None)
         return self._outcome(body_ids)
+
+    def get_preferred_material(self) -> str | None:
+        return self.preferred
+
+    def set_preferred_material(self, name: str) -> OperationResult[None]:
+        if self.fail_preferred_write is not None:
+            return OperationResult.fail("PREFERRED_MATERIAL_WRITE_FAILED", self.fail_preferred_write)
+        self.preferred_writes.append(name)
+        self.preferred = name
+        return OperationResult.success()
 
     def _outcome(self, body_ids: Sequence[BodyId]) -> OperationResult[PartChangeOutcome]:
         failed = {b: self.fail_on[b] for b in body_ids if b in self.fail_on}
@@ -202,6 +216,8 @@ def world(
     sheet_metal_app: bool = False,
     fail_on: Mapping[str, str] | None = None,
     with_display_rules: bool = False,
+    preferred: str | None = None,
+    settings: AssignmentSettings | None = None,
 ) -> World:
     """The baseline rules, without the display material module unless asked: its warning (no coating defined) would
     otherwise ride along on every assignment."""
@@ -210,6 +226,7 @@ def world(
         list(bodies),
         {a.body_id: a for a in assignments},
         fail_on={BodyId(k): v for k, v in (fail_on or {}).items()},
+        preferred=preferred,
     )
     service = MaterialAssignmentService(
         MaterialRuleSet.from_modules(
@@ -225,7 +242,7 @@ def world(
     sheet_metal = FakeSheetMetal(table, part_preference)
     dialogs = FakeDialogs(*answers)
     services = AssignmentServices(service, sheet_metal, SheetMetalAssignmentSupport(table), sheet_metal_app)
-    return World(part, sheet_metal, dialogs, AssignmentSession(services, dialogs))
+    return World(part, sheet_metal, dialogs, AssignmentSession(services, dialogs, settings=settings))
 
 
 def ids(*names: str) -> list[BodyId]:

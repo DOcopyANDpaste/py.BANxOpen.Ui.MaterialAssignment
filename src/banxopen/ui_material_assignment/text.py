@@ -38,6 +38,9 @@ class UiText:
     menu_remove_material = "Remove material"
     menu_remove_from_pending = "Remove from pending"
     menu_clear_all_pending = "Clear all pending"
+    menu_set_preferred = "Set as preferred"
+    menu_remove_preferred = "Remove as preferred"
+    """In place of "Set as preferred" on the material that already is the preferred one."""
 
     # ---- Tree columns ----
 
@@ -94,6 +97,38 @@ class UiText:
 
     def group_pending_count(self, count: int) -> str:
         return f"{count} pending"
+
+    # ---- Preferred material ----
+
+    kind_preferred = "Preferred"
+    """The pending tree's Kind column on the preferred-material entry."""
+
+    def preferred_entry(self, material: str) -> str:
+        """The pending tree's entry for a preferred-material change no pending assignment carries."""
+        return f"Preferred material: {material}"
+
+    def status_preferred(self, attribute: str, current: str | None) -> str:
+        return f"Writes '{attribute}' (now {current if current else 'empty'})"
+
+    def preferred_required(self, sheet_metal_part: bool) -> str:
+        if sheet_metal_part:
+            return (
+                "The sheet metal body would be left with no material, so the part would have no preferred material."
+                f"{_PARA}Assign a material to the sheet metal body before saving."
+            )
+        return (
+            f"Define a preferred material before saving.{_PARA}"
+            f'Right-click a material in any of the three lists and choose "{self.menu_set_preferred}".'
+        )
+
+    def preferred_not_on_any_body(self, material: str) -> str:
+        return (
+            f"{material} is not assigned to any body, and no pending change assigns it.{_PARA}"
+            "The preferred material change has been added to the pending list."
+        )
+
+    def preferred_not_on_any_body_after_apply(self, material: str) -> str:
+        return f"Preferred material {material} is not assigned to any body in the part."
 
     # ---- Why a body was left out of pending (the per-body apply reasons are MaterialsText's) ----
 

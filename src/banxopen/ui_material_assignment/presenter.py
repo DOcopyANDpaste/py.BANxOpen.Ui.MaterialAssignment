@@ -185,6 +185,8 @@ class MaterialAssignmentPresenter:
             session.stage(pick, self._view.selected_body_ids())
         elif item_id == MaterialMenu.APPLY_SHEET_METAL_PREFERENCE and pick.row is not None:
             session.apply_preference_only(pick.row)
+        elif item_id == MaterialMenu.SET_PREFERRED:
+            session.toggle_preferred(pick.material.name)  # a row stands for its physical material
         self._render()
 
     # ---- Current assignment tree ----
@@ -208,7 +210,18 @@ class MaterialAssignmentPresenter:
             self._add_to_selection(bodies)
         elif item_id == AssignmentMenu.REMOVE_MATERIAL:
             self._session.stage_removal(tuple(dict.fromkeys(b.id for b in bodies)))
+        elif item_id == AssignmentMenu.SET_PREFERRED:
+            material = next((t.material_label for t in targets if not t.is_unassigned), None)
+            if material is not None:
+                self._session.toggle_preferred(material)
         self._render()
+
+    def on_assignment_state_changed(self, row: AssignmentRowRef | None) -> None:
+        """A click on a material's box: the same as its "Set as preferred". The tree is redrawn either way, since NX
+        has already flipped the box, and the box must show what the session says."""
+        if row is not None and row.body is None and not row.is_unassigned:
+            self._session.toggle_preferred(row.material_label)
+        self._redraw_preferred()
 
     # ---- Pending tree ----
 
@@ -231,7 +244,18 @@ class MaterialAssignmentPresenter:
             entries = [t.entry for t in targets if t.row is None]
             body_ids = {t.row.body.id for t in targets if t.row is not None}
             self._session.remove_from_pending(entries, body_ids)
+        elif item_id == PendingMenu.SET_PREFERRED:
+            material = next((t.entry.material.name for t in targets if isinstance(t.entry, PendingAssignment)), None)
+            if material is not None:
+                self._session.toggle_preferred(material)
         self._render()
+
+    def on_pending_state_changed(self, row: PendingRowRef | None) -> None:
+        """A click on an assignment entry's box: checks it, or unchecks it ("Remove as preferred"). The box of the
+        preferred-material entry itself does nothing: that entry is removed from its menu."""
+        if row is not None and row.row is None and isinstance(row.entry, PendingAssignment):
+            self._session.toggle_preferred(row.entry.material.name)
+        self._redraw_preferred()
 
     # ---- Helpers ----
 
@@ -260,6 +284,12 @@ class MaterialAssignmentPresenter:
             return
         _log.debug("Opening the property window for '%s'.", material.name)
         self._property_window.show(material)
+
+    def _redraw_preferred(self) -> None:
+        """Both trees, whatever the session recorded: after a box click NX shows the box flipped, right or not."""
+        self._session.take_changes()  # both trees are redrawn below; the rest did not change
+        self._view.show_assignment_tree(assignment_rows(self._session))
+        self._view.show_pending_tree(pending_rows(self._session))
 
     def _render(self) -> None:
         """Redraws only what changed: a rebuilt tree loses its selection."""

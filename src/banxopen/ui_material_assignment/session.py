@@ -4,7 +4,8 @@ Changes are staged. "Add to pending" and "Remove material" only list the change 
 touched, so the current-assignment tree keeps showing what the bodies really have. A body has at most one pending
 change, and the latest action replaces an earlier one. Apply/OK apply the pending list, and Apply is final: whatever
 does not apply stays pending with the reason. Cancel, "Remove from pending" and "Clear all pending" only drop entries.
-The decision tree is in README.md.
+The preferred material is one more pending change, written to the part attribute after the list applies; Apply/OK need
+one defined. The decision tree is in README.md.
 
 What a rule allows, what needs confirming, the sheet metal conflict and every per-body reason come from the libraries
 (`MaterialAssignmentService`, `SheetMetalAssignmentSupport`) and are shown as they word them. What is left here is the
@@ -53,6 +54,7 @@ from banxopen.ui_material_assignment.pending import (
     PendingBodyRow,
     PendingBodyStatus,
     PendingEntry,
+    PendingPreferred,
     PendingRemoval,
     claims_by_body,
     for_sheet_metal,
@@ -94,6 +96,15 @@ class AssignmentServices:
 
 
 @dataclass(frozen=True, slots=True)
+class AssignmentSettings:
+    """The dialog's switchable policies."""
+
+    warn_preferred_not_in_part: bool = False
+    """Tell the user when the material set as preferred is on no body and no pending change assigns it. Off: any
+    material may be preferred without comment. Either way it is allowed."""
+
+
+@dataclass(frozen=True, slots=True)
 class MaterialPick:
     """A material tree row: a physical material, or one of its rows in the sheet metal standards file, which is what
     the part's Sheet Metal Preferences are set to. A row carries the physical material it is made of, since that is
@@ -125,7 +136,13 @@ class AssignmentSession:
     """One dialog session. Every gesture says what it shows through `Dialogs` and records what it changed (see
     `take_changes`); the presenter redraws from the properties below."""
 
-    def __init__(self, services: AssignmentServices, dialogs: Dialogs, text: UiText | None = None) -> None:
+    def __init__(
+        self,
+        services: AssignmentServices,
+        dialogs: Dialogs,
+        text: UiText | None = None,
+        settings: AssignmentSettings | None = None,
+    ) -> None:
         self._materials = services.materials
         self._sheet_metal = services.sheet_metal
         self._support = services.support
@@ -134,6 +151,7 @@ class AssignmentSession:
         self._sheet_metal_text = services.sheet_metal_text
         self._dialogs = dialogs
         self.text = text or UiText.DEFAULT
+        self.settings = settings or AssignmentSettings()
         self.support = services.support
         self.show_grade_column = services.is_sheet_metal_application
         """The current-assignment tree's SheetMetal Grade column: in the NX Sheet Metal application only."""
@@ -159,6 +177,12 @@ class AssignmentSession:
 
         self.pending: list[PendingEntry] = []
         """At most one PendingRemoval (first), any number of PendingAssignment; each body in at most one entry."""
+
+        self.part_preferred: str | None = None
+        """The part's preferred-material attribute, re-read with the bodies. What the current-assignment tree checks:
+        it never changes before Apply."""
+        self._staged_preferred: str | None = None
+        """The preferred-material change the user staged. Unused on a sheet metal part, where it follows the body."""
 
         self._filter_seeded = False
         self._initial_sync_checked = False
@@ -195,7 +219,9 @@ class AssignmentSession:
     def apply(self, selected_ids: Sequence[BodyId]) -> bool:
         """Apply. With nothing pending and a sheet metal material picked, applies that instead. False keeps the dialog
         from treating it as done."""
-        if self.pending:
+        if self.has_changes:
+            if not self._preferred_ready():
+                return False
             self._commit()
             return True
         pick = self.picked_sheet_metal_material()
@@ -208,8 +234,8 @@ class AssignmentSession:
         """OK: True lets the dialog close. An empty pending list is a normal end. A picked sheet metal material is
         applied as Apply would when it has somewhere to go; with bodies in the part but none selected there is nothing
         for it to go on, so OK just closes. Anything left pending keeps the dialog open, to show what did not apply."""
-        if self.pending:
-            return self._commit()
+        if self.has_changes:
+            return self._preferred_ready() and self._commit()
         pick = self.picked_sheet_metal_material()
         if pick is not None and (selected_ids or not self.part_has_solid):
             return self._apply_picked(pick, selected_ids)
@@ -218,9 +244,11 @@ class AssignmentSession:
     def cancel(self) -> bool:
         """Cancel or close: True lets the dialog close. Apply is final, so nothing applied is reverted; pending changes
         were never applied, so they are discarded after a warning."""
-        if self.pending and not self._dialogs.ask(self.text.discard_pending(len(self.pending))):
+        count = self.pending_count
+        if count and not self._dialogs.ask(self.text.discard_pending(count)):
             return False
         self.pending.clear()
+        self._staged_preferred = None
         return True
 
     def refresh(self) -> None:
@@ -541,15 +569,140 @@ class AssignmentSession:
 
     # ---- Removing from pending (the part is not touched) ----
 
-    def remove_from_pending(self, entries: Collection[PendingEntry], body_ids: Collection[BodyId]) -> None:
-        """A whole entry for each of `entries`; just the body for each of `body_ids`."""
+    def remove_from_pending(
+        self, entries: Collection[PendingEntry | PendingPreferred], body_ids: Collection[BodyId]
+    ) -> None:
+        """A whole entry for each of `entries`; just the body for each of `body_ids`. The preferred-material entry
+        drops the preferred change. Removing an assignment entry whose box is checked keeps the change: it is then
+        shown as its own entry."""
+        if any(isinstance(e, PendingPreferred) for e in entries):
+            self._staged_preferred = None
         kept = [e for e in self.pending if not any(e is x for x in entries)]
         self.pending = without_bodies(kept, set(body_ids))
         self._changed(Section.PENDING, Section.ASSIGNMENTS)
 
     def clear_pending(self) -> None:
         self.pending = []
+        self._staged_preferred = None
         self._changed(Section.PENDING, Section.ASSIGNMENTS)
+
+    # ---- Preferred material ----
+    #
+    # One per part, written to the part attribute after the pending list applies. The current-assignment tree shows
+    # the part's value and never changes before Apply; every change is pending. On a sheet metal part, which allows
+    # one material, it follows the sheet metal body and cannot be set by hand.
+
+    @property
+    def is_sheet_metal_part(self) -> bool:
+        return any(b.kind is BodyKind.SHEET_METAL for b in self.bodies)
+
+    @property
+    def pending_preferred(self) -> str | None:
+        """The preferred material Apply will write, when that is a change; None when nothing is to change. On a sheet
+        metal part: the material pending for the sheet metal body, or the body's own material when the part's value
+        differs from it."""
+        if not self.is_sheet_metal_part:
+            return self._staged_preferred
+        target, claimed = self._sheet_metal_preferred()
+        if target is None:
+            return None
+        return target if claimed or not same_name(target, self.part_preferred) else None
+
+    @property
+    def effective_preferred(self) -> str | None:
+        """What the part's preferred material will be after Apply."""
+        if self.is_sheet_metal_part:
+            return self._sheet_metal_preferred()[0]
+        return self._staged_preferred or self.part_preferred
+
+    @property
+    def preferred_changed(self) -> bool:
+        """True when Apply will write the attribute. Clearing it is never a change: the gate refuses that instead."""
+        effective = self.effective_preferred
+        return effective is not None and not same_name(effective, self.part_preferred)
+
+    @property
+    def preferred_on_entry(self) -> bool:
+        """True when a pending assignment carries the pending preferred material, so its box shows the change."""
+        preferred = self.pending_preferred
+        return preferred is not None and any(
+            isinstance(e, PendingAssignment) and same_name(e.material.name, preferred) for e in self.pending
+        )
+
+    @property
+    def pending_count(self) -> int:
+        """Pending entries as the pending tree shows them: the preferred change counts when it is its own entry."""
+        own = self.pending_preferred is not None and not self.preferred_on_entry
+        return len(self.pending) + (1 if own else 0)
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.pending) or self.preferred_changed
+
+    def can_unset_preferred(self, material: str) -> bool:
+        """True when `material` is the preferred one because of a pending change, which "Remove as preferred" drops.
+        The part's own value cannot be unset: a part needs a preferred material, so another one replaces it."""
+        return (
+            not self.is_sheet_metal_part
+            and self._staged_preferred is not None
+            and same_name(material, self._staged_preferred)
+        )
+
+    def toggle_preferred(self, material: str) -> None:
+        """The menu's Set as preferred, or Remove as preferred on the material that already is the preferred one."""
+        if self.can_unset_preferred(material):
+            self.drop_preferred_change()
+        else:
+            self.set_preferred(material)
+
+    def set_preferred(self, material: str) -> None:
+        """Stages `material` as the preferred material, replacing any earlier change. Any material is allowed, on a body
+        or not. Choosing the part's own value drops the change. Ignored on a sheet metal part."""
+        self._changed(Section.PENDING, Section.ASSIGNMENTS)
+        if self.is_sheet_metal_part:
+            _log.debug("Set as preferred ignored: on a sheet metal part it follows the sheet metal body.")
+            return
+        if same_name(material, self.part_preferred):
+            self._staged_preferred = None
+            return
+        self._staged_preferred = material
+        if self.settings.warn_preferred_not_in_part and not self._on_a_body_after_apply(material):
+            self._dialogs.show_info(self.text.title, self.text.preferred_not_on_any_body(material))
+
+    def drop_preferred_change(self) -> None:
+        self._staged_preferred = None
+        self._changed(Section.PENDING, Section.ASSIGNMENTS)
+
+    def _sheet_metal_preferred(self) -> tuple[str | None, bool]:
+        """(the sheet metal bodies' material after Apply, whether a pending change decides it). One material per sheet
+        metal part, so the first sheet metal body with a pending change speaks for all."""
+        claims = claims_by_body(self.pending)
+        sheet_metal = [b for b in self.bodies if b.kind is BodyKind.SHEET_METAL]
+        for b in sheet_metal:
+            claim = claims.get(b.id)
+            if claim is not None:
+                return (claim.material.name if isinstance(claim, PendingAssignment) else None), True
+        return (self._material_of(sheet_metal[0].id) if sheet_metal else None), False
+
+    def _on_a_body_after_apply(self, material: str) -> bool:
+        claims = claims_by_body(self.pending)
+        for b in self.bodies:
+            claim = claims.get(b.id)
+            after = (
+                (claim.material.name if isinstance(claim, PendingAssignment) else None)
+                if claim is not None
+                else self._material_of(b.id)
+            )
+            if same_name(after, material):
+                return True
+        return False
+
+    def _preferred_ready(self) -> bool:
+        """The save gate: with changes to save, a preferred material must be defined. False, after saying so."""
+        if self.effective_preferred is not None:
+            return True
+        self._dialogs.show_error(self.text.preferred_required(self.is_sheet_metal_part))
+        return False
 
     # ---- Sheet Metal Preferences without bodies ----
 
@@ -565,7 +718,7 @@ class AssignmentSession:
         it sets only the preferences, after a warning, but only on a part with no solid body: once there are bodies,
         the preferences go with their material, so they are never set on their own."""
         if selected_ids:
-            return self.stage(pick, selected_ids) and self._commit()
+            return self.stage(pick, selected_ids) and self._preferred_ready() and self._commit()
         row = pick.row
         assert row is not None, "a picked sheet metal material always has its row"
         if self.part_has_solid:
@@ -579,7 +732,8 @@ class AssignmentSession:
     def _commit(self) -> bool:
         """Applies every pending change: the removal first, then each assignment in order, each re-planned against the
         part as it now stands. The confirmations each entry was given are reused; a body that newly needs one is asked.
-        A body that is not changed stays pending with the reason. True when nothing is left pending."""
+        A body that is not changed stays pending with the reason. Then the preferred material is written, when it
+        changes. True when nothing is left pending."""
         self._refresh_body_state()
         left: list[PendingEntry] = []
         report: list[str] = []
@@ -589,15 +743,43 @@ class AssignmentSession:
         for entry in [e for e in self.pending if isinstance(e, PendingAssignment)]:
             self._commit_assignment(entry, left, report)
         self.pending = left
+        preferred_failed = self._commit_preferred(report)
 
         if report:
             details = self.text.join_sections(report)
-            if left:
+            if left or preferred_failed:
                 self._dialogs.show_error(self.text.still_pending(details))
             else:
                 self._dialogs.show_info(self.text.title, self.text.applied_with_notes(details))
         self.refresh()
-        return not left
+        return not left and not preferred_failed
+
+    def _commit_preferred(self, report: list[str]) -> bool:
+        """Writes the preferred material after the bodies changed. On a sheet metal part it is the material the sheet
+        metal body really has now, so a body Apply could not change does not leave the attribute claiming otherwise.
+        True when the write failed; the change then stays pending."""
+        if self.is_sheet_metal_part:
+            target = self._sheet_metal_material_now()
+            preferred = target if target is not None and not same_name(target, self.part_preferred) else None
+        else:
+            preferred = self._staged_preferred
+        if preferred is None:
+            return False
+        result = self._materials.set_preferred_material(preferred)
+        if not result.ok:
+            report.append(self.text.entry_report(self.text.preferred_entry(preferred), [result.message or ""]))
+            return True
+        self._staged_preferred = None
+        self.part_preferred = preferred
+        if self.settings.warn_preferred_not_in_part and not any(
+            same_name(a.material_name, preferred) for a in self.assignments.values()
+        ):
+            report.append(self.text.preferred_not_on_any_body_after_apply(preferred))
+        return False
+
+    def _sheet_metal_material_now(self) -> str | None:
+        sheet_metal = next((b for b in self.bodies if b.kind is BodyKind.SHEET_METAL), None)
+        return self._material_of(sheet_metal.id) if sheet_metal is not None else None
 
     def _commit_removal(self, removal: PendingRemoval, left: list[PendingEntry], report: list[str]) -> None:
         present, lines = self._still_present(removal)
@@ -717,6 +899,7 @@ class AssignmentSession:
     def _refresh_body_state(self) -> None:
         self.bodies = tuple(self._materials.bodies())
         self.assignments = self._materials.current_assignments()
+        self.part_preferred = self._materials.preferred_material()
         # Only sheet metal parts have preferences worth reading; asking any other part only logs a read failure.
         has_sheet_metal = any(b.kind is BodyKind.SHEET_METAL for b in self.bodies)
         self.part_preference = (

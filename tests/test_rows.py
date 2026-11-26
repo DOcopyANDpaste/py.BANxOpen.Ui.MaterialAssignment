@@ -145,7 +145,7 @@ def test_the_pending_tree_shows_each_entry_and_its_bodies_status():
 
 
 def test_a_body_apply_left_behind_shows_why():
-    w = world([body("b1")], library(PLAIN, STEEL), fail_on={"b1": "refused"})
+    w = world([body("b1")], library(PLAIN, STEEL), fail_on={"b1": "refused"}, preferred="Steel")
     s = opened(w)
     s.stage(MaterialPick(STEEL), ids("b1"))
     s.apply([])

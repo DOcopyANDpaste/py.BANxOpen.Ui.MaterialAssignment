@@ -202,6 +202,13 @@ class MaterialAssignmentView:
                     lambda _t, node, item: p.on_assignment_command(item, assignments.resolve_selected_or(node)),
                 )
             )
+            # The preferred-material box. Fires on a click of the state icon, not on SetState.
+            tree.SetOnStateChangeHandler(
+                _guarded(
+                    "current assignment preferred box",
+                    lambda _t, node, _state: p.on_assignment_state_changed(assignments.resolve(node)),
+                )
+            )
         if pending is not None:
             tree = self._pending.tree
 
@@ -219,6 +226,12 @@ class MaterialAssignmentView:
                 _guarded(
                     "pending tree command",
                     lambda _t, node, item: p.on_pending_command(item, pending.resolve_selected_or(node)),
+                )
+            )
+            tree.SetOnStateChangeHandler(
+                _guarded(
+                    "pending preferred box",
+                    lambda _t, node, _state: p.on_pending_state_changed(pending.resolve(node)),
                 )
             )
 

@@ -8,14 +8,21 @@ from dataclasses import dataclass
 from typing import Final
 
 from banxopen.foundation import BodyId, BodyInfo
-from banxopen.foundation.ui import SEPARATOR, MenuItem, TreeRow
-from banxopen.materials import Material, MaterialCategoryNode, MaterialId, MaterialPropertyValue
+from banxopen.foundation.ui import CHECKED, SEPARATOR, UNCHECKED, MenuItem, TreeRow
+from banxopen.materials import (
+    Material,
+    MaterialCategoryNode,
+    MaterialId,
+    MaterialPartAttributes,
+    MaterialPropertyValue,
+)
 from banxopen.sheetmetal import SheetMetalMaterialRow, SheetMetalRowFilter, format_thickness
 from banxopen.ui_material_assignment.pending import (
     PendingAssignment,
     PendingBodyRow,
     PendingBodyStatus,
     PendingEntry,
+    PendingPreferred,
     PendingRemoval,
 )
 from banxopen.ui_material_assignment.session import AssignmentSession, MaterialPick, same_name
@@ -95,9 +102,10 @@ class AssignmentRowRef:
 
 @dataclass(frozen=True, slots=True)
 class PendingRowRef:
-    """A pending row: a whole entry (`row` None), or one body in it."""
+    """A pending row: a whole entry (`row` None), or one body in it. The preferred-material change is an entry with no
+    bodies."""
 
-    entry: PendingEntry
+    entry: PendingEntry | PendingPreferred
     row: PendingBodyRow | None
 
     @property
@@ -105,9 +113,11 @@ class PendingRowRef:
         return tuple(r.body for r in self.entry.rows) if self.row is None else (self.row.body,)
 
 
-def entry_name(session: AssignmentSession, entry: PendingEntry) -> str:
+def entry_name(session: AssignmentSession, entry: PendingEntry | PendingPreferred) -> str:
     if isinstance(entry, PendingRemoval):
         return session.text.remove_material_entry
+    if isinstance(entry, PendingPreferred):
+        return session.text.preferred_entry(entry.material)
     return session.support.label(entry.material.name, entry.row)
 
 
@@ -215,8 +225,8 @@ def property_rows(material: Material, text: UiText) -> tuple[TreeRow[MaterialPro
 
 
 def assignment_groups(session: AssignmentSession) -> tuple[AssignmentRowRef, ...]:
-    """One group per material name in use (case-insensitive, first spelling met), bodies by name; the unassigned
-    group last, the rest by name."""
+    """One group per material name in use (case-insensitive, first spelling met), bodies by name; the part's preferred
+    material first, the unassigned group last, the rest by name."""
     text = session.text
     by_id = {b.id: b for b in session.bodies}
     groups: dict[str, tuple[str, list[MaterialId | None], list[BodyId]]] = {}
@@ -231,11 +241,18 @@ def assignment_groups(session: AssignmentSession) -> tuple[AssignmentRowRef, ...
         bodies = sorted((by_id[i] for i in ids if i in by_id), key=lambda b: b.name.casefold())
         unassigned = resolved_id is None and label == text.unassigned
         result.append(AssignmentRowRef(label, resolved_id, tuple(bodies), None, unassigned, len(ids)))
-    return tuple(sorted(result, key=lambda r: (r.is_unassigned, r.material_label.casefold())))
+    preferred = session.part_preferred
+
+    def key(r: AssignmentRowRef) -> tuple[bool, bool, str]:
+        is_preferred = not r.is_unassigned and same_name(r.material_label, preferred)
+        return (not is_preferred, r.is_unassigned, r.material_label.casefold())
+
+    return tuple(sorted(result, key=key))
 
 
 def assignment_rows(session: AssignmentSession) -> tuple[TreeRow[AssignmentRowRef], ...]:
-    """The part's real materials, with what the pending list is about to change beside each body."""
+    """The part's real materials, with what the pending list is about to change beside each body. Each material's box
+    shows the part's preferred material as it is now: a change to it is pending, not shown here."""
     text = session.text
     support = session.support
     preference = session.part_preference
@@ -263,7 +280,10 @@ def assignment_rows(session: AssignmentSession) -> tuple[TreeRow[AssignmentRowRe
                 )
             ref = AssignmentRowRef(group.material_label, group.resolved_material_id, (body,), body, group.is_unassigned)
             children.append(TreeRow(body.name, ref, body_columns))
-        rows.append(TreeRow(group.material_label, group, columns, tuple(children)))
+        state = None
+        if not group.is_unassigned:
+            state = CHECKED if same_name(group.material_label, session.part_preferred) else UNCHECKED
+        rows.append(TreeRow(group.material_label, group, columns, tuple(children), state))
     return tuple(rows)
 
 
@@ -299,25 +319,54 @@ def image_of(session: AssignmentSession, row: AssignmentRowRef | None) -> str | 
 
 
 def pending_rows(session: AssignmentSession) -> tuple[TreeRow[PendingRowRef], ...]:
-    return tuple(
-        TreeRow(
-            entry_name(session, entry),
-            PendingRowRef(entry, None),
-            {PendingColumn.KIND: str(len(entry.rows))},
-            tuple(
-                TreeRow(
-                    row.body.name,
-                    PendingRowRef(entry, row),
-                    {
-                        PendingColumn.KIND: row.body.kind.value,
-                        PendingColumn.STATUS: pending_status(session, entry, row),
-                    },
-                )
-                for row in entry.rows
-            ),
+    """The pending preferred material is checked on the assignment entries of that material, or shown as its own entry
+    when none has it; either way it is listed first. Only the display is reordered: Apply keeps the session's order."""
+    preferred = session.pending_preferred
+    rows: list[TreeRow[PendingRowRef]] = []
+    if preferred is not None and not session.preferred_on_entry:
+        rows.append(
+            TreeRow(
+                session.text.preferred_entry(preferred),
+                PendingRowRef(PendingPreferred(preferred), None),
+                {
+                    PendingColumn.KIND: session.text.kind_preferred,
+                    PendingColumn.STATUS: session.text.status_preferred(
+                        f"{MaterialPartAttributes.CATEGORY} / {MaterialPartAttributes.PREFERRED_MATERIAL}",
+                        session.part_preferred,
+                    ),
+                },
+                state=CHECKED,
+            )
         )
-        for entry in session.pending
-    )
+
+    def is_preferred(entry: PendingEntry) -> bool:
+        return isinstance(entry, PendingAssignment) and same_name(entry.material.name, preferred)
+
+    ordered = sorted(session.pending, key=lambda e: not is_preferred(e))  # stable: the rest keep their order
+    for entry in ordered:
+        state = None
+        if isinstance(entry, PendingAssignment):
+            state = CHECKED if is_preferred(entry) else UNCHECKED
+        rows.append(
+            TreeRow(
+                entry_name(session, entry),
+                PendingRowRef(entry, None),
+                {PendingColumn.KIND: str(len(entry.rows))},
+                tuple(
+                    TreeRow(
+                        row.body.name,
+                        PendingRowRef(entry, row),
+                        {
+                            PendingColumn.KIND: row.body.kind.value,
+                            PendingColumn.STATUS: pending_status(session, entry, row),
+                        },
+                    )
+                    for row in entry.rows
+                ),
+                state,
+            )
+        )
+    return tuple(rows)
 
 
 def pending_status(session: AssignmentSession, entry: PendingEntry, row: PendingBodyRow) -> str:
@@ -400,6 +449,8 @@ class MaterialMenu:
     PROPERTIES: Final = 103
     REFRESH: Final = 104
     APPLY_SHEET_METAL_PREFERENCE: Final = 105
+    SET_PREFERRED: Final = 106
+    """Set as preferred, or Remove as preferred on the preferred material."""
 
 
 class AssignmentMenu:
@@ -407,11 +458,13 @@ class AssignmentMenu:
     REMOVE_MATERIAL: Final = 202
     REFRESH: Final = 203
     ADD_TO_BODY_SELECTION: Final = 204
+    SET_PREFERRED: Final = 205
 
 
 class PendingMenu:
     REMOVE: Final = 301
     CLEAR_ALL: Final = 302
+    SET_PREFERRED: Final = 303
 
 
 def material_menu(session: AssignmentSession, clicked: MaterialPick | None, has_bodies: bool) -> tuple[MenuItem, ...]:
@@ -430,6 +483,8 @@ def material_menu(session: AssignmentSession, clicked: MaterialPick | None, has_
                 clicked.row is not None,
             )
         )
+    # A row stands for the physical material it is made of: that is what the preferred material names.
+    items.append(preferred_item(session, MaterialMenu.SET_PREFERRED, clicked.material.name))
     items += [
         SEPARATOR,
         MenuItem(MaterialMenu.PROPERTIES, text.menu_properties),
@@ -450,6 +505,9 @@ def assignment_menu(session: AssignmentSession, clicked: AssignmentRowRef | None
         MenuItem(AssignmentMenu.SELECT_BODIES, text.menu_select_bodies),
         MenuItem(AssignmentMenu.ADD_TO_BODY_SELECTION, text.menu_add_to_body_selection, has_solid),
         MenuItem(AssignmentMenu.REMOVE_MATERIAL, text.menu_remove_material, has_material),
+        preferred_item(
+            session, AssignmentMenu.SET_PREFERRED, None if clicked.is_unassigned else clicked.material_label
+        ),
         SEPARATOR,
         MenuItem(AssignmentMenu.REFRESH, text.menu_refresh),
     )
@@ -457,8 +515,30 @@ def assignment_menu(session: AssignmentSession, clicked: AssignmentRowRef | None
 
 def pending_menu(session: AssignmentSession, clicked: PendingRowRef | None) -> tuple[MenuItem, ...]:
     text = session.text
-    clear_all = MenuItem(PendingMenu.CLEAR_ALL, text.menu_clear_all_pending, bool(session.pending))
+    clear_all = MenuItem(PendingMenu.CLEAR_ALL, text.menu_clear_all_pending, bool(session.pending_count))
     if clicked is None:
         return (clear_all,)
+    entry = clicked.entry
+    if isinstance(entry, PendingPreferred):
+        # On a sheet metal part the change follows the body: it goes when the body's pending change does.
+        remove = MenuItem(PendingMenu.REMOVE, text.menu_remove_from_pending, not session.is_sheet_metal_part)
+        return (remove, SEPARATOR, clear_all)
     # Nothing is applied from here: Apply/OK apply the whole pending list at once.
-    return (MenuItem(PendingMenu.REMOVE, text.menu_remove_from_pending), SEPARATOR, clear_all)
+    material = entry.material.name if isinstance(entry, PendingAssignment) else None
+    return (
+        MenuItem(PendingMenu.REMOVE, text.menu_remove_from_pending),
+        preferred_item(session, PendingMenu.SET_PREFERRED, material),
+        SEPARATOR,
+        clear_all,
+    )
+
+
+def preferred_item(session: AssignmentSession, item_id: int, material: str | None) -> MenuItem:
+    """Set as preferred; Remove as preferred on the material that already is the preferred one, enabled only when that
+    is a pending change. Disabled with no material, and on a sheet metal part, where it follows the body."""
+    text = session.text
+    if material is None or session.is_sheet_metal_part:
+        return MenuItem(item_id, text.menu_set_preferred, False)
+    if same_name(material, session.effective_preferred):
+        return MenuItem(item_id, text.menu_remove_preferred, session.can_unset_preferred(material))
+    return MenuItem(item_id, text.menu_set_preferred)
