@@ -1,6 +1,8 @@
 """Type-only: pyright checks that the real NX classes are what the session's and presenter's protocols say. dialog.py
 cannot be relied on for this, since the untyped generated base class turns argument checks off there."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

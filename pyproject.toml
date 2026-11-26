@@ -2,7 +2,7 @@
 name = "banxopen-ui-material-assignment"
 description = "BANxOpen Material Assignment: the NX Block UI dialog that assigns physical materials to bodies."
 dynamic = ["version"]
-requires-python = "==3.11.*"          # must match NX 2412's embedded Python
+requires-python = "==3.12.*"          # must match the NX embedded Python (3.12)
 dependencies = ["banxopen-foundation>=1.1.0", "banxopen-materials>=1.0.0", "banxopen-sheetmetal>=1.1.0"]
 
 [project.optional-dependencies]
@@ -24,7 +24,7 @@ path = "src/banxopen/ui_material_assignment/__init__.py"
 packages = ["src/banxopen"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120               # the team's C# column width
 src = ["src", "tests"]
 
@@ -35,6 +35,7 @@ ignore = ["ANN401"]                   # Any is allowed at NX boundaries (with a 
 [tool.ruff.lint.isort]
 known-first-party = ["banxopen"]
 known-local-folder = ["builders"]
+required-imports = ["from __future__ import annotations"]   # 3.12 evaluates annotations eagerly; keep them lazy
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN"]
@@ -45,7 +46,7 @@ known-local-folder = ["builders"]
 exclude = ["**/*_generated.py"]
 
 [tool.pyright]
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 typeCheckingMode = "standard"
 include = ["src", "tests"]
 venvPath = "."

@@ -1,5 +1,7 @@
 """The dialog's pending-list behaviour (README.md's decision tree), against the real material rules on a fake part."""
 
+from __future__ import annotations
+
 import dataclasses
 
 from banxopen.foundation import BodyId, BodyKind, OperationResult

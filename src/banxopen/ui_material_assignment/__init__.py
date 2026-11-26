@@ -3,4 +3,6 @@
 Run `application/MaterialAssignment.py` in NX. The dialog's logic (`session`, `presenter`, `rows`) imports without NX.
 """
 
+from __future__ import annotations
+
 __version__ = "1.0.0"

@@ -1,5 +1,7 @@
 """The presenter only reads the view, calls one gesture and redraws what changed."""
 
+from __future__ import annotations
+
 from banxopen.foundation import BodyKind
 from banxopen.materials import Material
 from banxopen.ui_material_assignment.presenter import Block, MaterialAssignmentPresenter

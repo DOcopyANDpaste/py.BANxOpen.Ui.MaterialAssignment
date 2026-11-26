@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, Generic, TypeVar
+from typing import Final
 
 from banxopen.foundation import BodyId, BodyInfo
 from banxopen.foundation.ui import SEPARATOR, MenuItem, TreeRow
@@ -21,7 +21,6 @@ from banxopen.ui_material_assignment.pending import (
 from banxopen.ui_material_assignment.session import AssignmentSession, MaterialPick, same_name
 from banxopen.ui_material_assignment.text import UiText
 
-T = TypeVar("T")
 Column = tuple[int, str, int]
 """(id, title, width)."""
 
@@ -339,7 +338,7 @@ def pending_status(session: AssignmentSession, entry: PendingEntry, row: Pending
 
 
 @dataclass(frozen=True, slots=True)
-class FilterChoice(Generic[T]):
+class FilterChoice[T]:
     """One dropdown: "(Any)" then the options. A pick is mapped back through `values`, never parsed from the label,
     which is what lets a thickness be shown rounded and still compare exactly."""
 

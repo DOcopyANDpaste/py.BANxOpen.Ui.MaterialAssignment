@@ -1,7 +1,7 @@
 # BANxOpen.Ui.MaterialAssignment (Python)
 
 The NX Block UI dialog that assigns physical materials to bodies. It is the Python port of the C#
-`BANxOpen.Ui.MaterialAssignment` (NX 2412, CPython 3.11). Every rule, check and message comes from the libraries:
+`BANxOpen.Ui.MaterialAssignment` for NX 2606 (Designcenter), whose embedded Python is CPython 3.12. Every rule, check and message comes from the libraries:
 [Materials](https://github.com/DOcopyANDpaste/py.BANxOpen.Materials) (`MaterialAssignmentService`) and
 [SheetMetal](https://github.com/DOcopyANDpaste/py.BANxOpen.SheetMetal) (`SheetMetalAssignmentSupport`, `SheetMetalServices`).
 
@@ -189,8 +189,11 @@ The two `*_generated.py` files were transcribed from the C# Styler output, not g
 ## Development
 
 ```powershell
-uv venv --python 3.11
-uv pip install -e ".[dev]"                 # installs the three libraries editable
+python -m venv .venv                       # with Python 3.12: the version NX 2606 embeds (the template's .venv works)
+.venv\Scripts\python -m pip install -e ..\BANxOpen.Foundation   # sibling repos first, in dependency order: pip does not read [tool.uv.sources]
+.venv\Scripts\python -m pip install -e ..\BANxOpen.Materials
+.venv\Scripts\python -m pip install -e ..\BANxOpen.SheetMetal
+.venv\Scripts\python -m pip install -e ".[dev]"
 New-Item -ItemType Junction -Path .\typings -Target "$env:UGII_BASE_DIR\UGOPEN\pythonStubs"
 
 .venv\Scripts\ruff check . ; .venv\Scripts\pyright ; .venv\Scripts\lint-imports ; .venv\Scripts\python -m pytest --cov

@@ -1,5 +1,7 @@
 """What the trees, dropdowns and menus show."""
 
+from __future__ import annotations
+
 from banxopen.foundation import BodyKind
 from banxopen.materials import DisplayMaterial, MaterialId
 from banxopen.sheetmetal import SheetMetalRowFilter

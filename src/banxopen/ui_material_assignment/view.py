@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import NXOpen
 import NXOpen.BlockStyler
@@ -24,7 +24,6 @@ from banxopen.ui_material_assignment.presenter import Block, MaterialAssignmentP
 from banxopen.ui_material_assignment.rows import AssignmentRowRef, Column, FilterChoice, FilterChoices, PendingRowRef
 from banxopen.ui_material_assignment.session import MaterialPick
 
-T = TypeVar("T")
 _log = logging.getLogger(__name__)
 
 # ---- Block IDs, verbatim from BlockUI.dlx ----
@@ -63,7 +62,7 @@ _MATERIAL_PAGE, _ASSIGNMENT_PAGE, _PENDING_PAGE = 0, 1, 2
 
 
 @dataclass(slots=True)
-class _Page(Generic[T]):
+class _Page[T]:
     """One tab page's tree. Whether the tree is ready is asked of NX every time, never remembered: a tree's control
     can be gone, or rebuilt without its columns, after the page was first set up (an off-screen page, or NX
     recreating the controls after Apply). A redraw that cannot run now is kept and replayed when the page is next set
@@ -261,7 +260,7 @@ class MaterialAssignmentView:
             except NXOpen.NXException as ex:
                 _log.debug("Column %d ('%s') of the %s tree: %s", column_id, title, state.label, nx_error_detail(ex))
 
-    def _show_or_defer(self, state: _Page[T], rows: Sequence[TreeRow[T]]) -> None:
+    def _show_or_defer[T](self, state: _Page[T], rows: Sequence[TreeRow[T]]) -> None:
         """A tree's control exists only while its tab page is current, and redrawing one that is not there throws."""
         state.last = rows
         if state.binding is None:
@@ -272,7 +271,7 @@ class MaterialAssignmentView:
             state.waiting = rows
 
     @staticmethod
-    def _try_show(state: _Page[T], rows: Sequence[TreeRow[T]]) -> None:
+    def _try_show[T](state: _Page[T], rows: Sequence[TreeRow[T]]) -> None:
         if state.binding is None:
             return
         try:
@@ -432,7 +431,7 @@ def _tooltip(presenter: MaterialAssignmentPresenter, pick: MaterialPick | None) 
     return presenter.material_tooltip(pick) if pick is not None else ""
 
 
-def _if_value(value: T | None, action: Callable[[T], None]) -> None:
+def _if_value[T](value: T | None, action: Callable[[T], None]) -> None:
     if value is not None:
         action(value)
 
